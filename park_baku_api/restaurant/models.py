@@ -33,3 +33,5 @@ class Order(models.Model):
     
     def __str__(self):
         return f"{self.customer.customer_id} - ${self.amount} - {self.created_at.strftime('%Y-%m-%d')}" 
+    
+
