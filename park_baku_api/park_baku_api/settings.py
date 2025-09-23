@@ -25,7 +25,13 @@ SECRET_KEY = 'django-insecure-6q$3#n#)ln651rh-(dg^^-syf@9rtms@icdap0bb+h45iv6qoh
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [   
+    '127.0.0.1',
+    'localhost', 
+    '10.0.2.2',  # Для Android эмулятора
+    '0.0.0.0',   # Для любых локальных подключений
+
+]
 
 
 # Application definition
