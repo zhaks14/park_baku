@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status  # ДОБАВЬ status
 from django.contrib.auth.models import User  # ДОБАВЬ User
 from .models import Customer, Order
-from .serializers import CustomerSerializer
+from .serializers import CustomerSerializer,OrderSerializer
 import random  # ДОБАВЬ random
 
 
@@ -98,3 +98,31 @@ def verify_code(request):
             })
     
     return Response({'success': False, 'error': 'Invalid code'}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(["POST"])
+def createOrder(request):
+    """
+    Принимает customer_id и сумму заказа, создаёт заказ и начисляет бонусы.
+    """
+    customer_id = request.data.get("customer_id")
+    amount = request.data.get("amount")
+
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+    except Customer.DoesNotExist:
+        return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+    order = Order.objects.create(customer=customer, amount=amount)
+    serializer = OrderSerializer(order)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(["GET"])
+def getBalance(request, customer_id):
+    """
+    Возвращает баланс клиента: общие траты, бонусы, количество заказов.
+    """
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+    except Customer.DoesNotExist:
+        return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+    serializer = CustomerSerializer(customer)
+    return Response(serializer.data, status=status.HTTP_200_OK)

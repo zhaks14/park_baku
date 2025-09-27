@@ -8,6 +8,7 @@ class Customer(models.Model):
     total_spent = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     orders_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    bonus_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     
     def __str__(self):
         return f"{self.customer_id} - {self.user.username}"
@@ -29,7 +30,20 @@ class Order(models.Model):
         # Update customer's total spent and order count
         self.customer.total_spent += self.amount
         self.customer.orders_count += 1
+        self.customer.bonus_balance += self.calculate_bonus()
         self.customer.save()
+
+    def calculate_bonus(self):
+        spent = self.customer.total_spent
+        if spent >= 3_000_000:
+            percent = 15
+        elif spent >= 1_000_000:
+            percent = 10
+        elif spent >= 500_000:
+            percent = 5
+        else:
+            percent = 0
+        return self.amount * percent / 100
     
     def __str__(self):
         return f"{self.customer.customer_id} - ${self.amount} - {self.created_at.strftime('%Y-%m-%d')}" 
