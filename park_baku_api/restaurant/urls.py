@@ -8,7 +8,7 @@ router.register(r'customers', CustomerViewSet)
 urlpatterns = [
     path('', include(router.urls)),
     path('check-customer/', check_or_create_customer, name='check_customer'),
-    path('verify-code/', verify_code, name='verify_code'),
+    path('verify-code-legacy/', verify_code, name='verify_code'),
     path('orders/',createOrder, name="create_order"),
     path("customers/<str:customer_id>/balance/",getBalance, name="get_balance"),
     path("customers/<str:customer_id>/orders/", orderHistory, name="order_history"),

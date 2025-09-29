@@ -14,6 +14,10 @@ from django.conf import settings
 from twilio.rest import Client
 from decimal import Decimal
 
+TWILIO_ACCOUNT_SID = 'AC44b190420e71038a0d88e11bfe809cf6'
+TWILIO_AUTH_TOKEN = '1770fed861f4293401c8a67add3c2fe6'
+TWILIO_PHONE_NUMBER = '+18592377972'
+
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
@@ -168,17 +172,21 @@ def orderHistory(request,customer_id):
 @api_view(['POST'])
 def sendCode(request):
     phone = request.data.get('phone')
+    print("PHONE:", phone)
+    print("SID:", TWILIO_ACCOUNT_SID)
+    if not phone.startswith('+'):
+        phone = f'+{phone}'
     if not phone:
         return Response({'error': 'Phone is required'}, status=400)
 
     code = generate_code()
     SMSCode.objects.create(phone=phone, code=code)
 
-    client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     try:
         message = client.messages.create(
             body=f"Ваш код подтверждения: {code}",
-            from_=settings.TWILIO_PHONE_NUMBER,
+            from_=TWILIO_PHONE_NUMBER,
             to=phone
         )
     except Exception as e:
@@ -191,6 +199,14 @@ def verifyCode(request):
     phone = request.data.get('phone')
     code = request.data.get('code')
     sms = SMSCode.objects.filter(phone=phone).order_by('-created_at').first()
+    if code == "1234": # dla testa
+        customer = Customer.objects.filter(phone=phone.replace('+994','')).first()
+        if customer:
+            return Response({
+                'success': True,
+                'customer_id': customer.customer_id,
+                'user_id': customer.id
+            })
 
     if not sms:
         return Response({'success': False, 'message': 'Code not found'}, status=400)

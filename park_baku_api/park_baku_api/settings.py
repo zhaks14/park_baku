@@ -21,7 +21,7 @@ API_KEY = os.getenv('API_KEY')
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # это для настройки отправки сообщений для регистрации через смс
-TWILIO_ACCOUNT_SID = 'US32629c1ca82e41a557f251bd0250702d'
+TWILIO_ACCOUNT_SID = 'AC44b190420e71038a0d88e11bfe809cf6'
 TWILIO_AUTH_TOKEN = '1770fed861f4293401c8a67add3c2fe6'
 TWILIO_PHONE_NUMBER = '+18592377972'
 # Quick-start development settings - unsuitable for production
