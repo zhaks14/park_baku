@@ -1,10 +1,11 @@
+from itertools import count
 from rest_framework import viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.models import User
 from .models import Customer,Order,SMSCode
-from .serializers import CustomerSerializer,OrderSerializer
+from .serializers import CustomerSerializer,OrderSerializer,CustomerDetailSerializer
 import random
 from .utils import generate_code
 from django.utils import timezone
@@ -13,6 +14,8 @@ from random import randint
 from django.conf import settings
 from twilio.rest import Client
 from decimal import Decimal
+from django.db.models import Sum,Count
+from django.http import JsonResponse
 
 TWILIO_ACCOUNT_SID = 'AC44b190420e71038a0d88e11bfe809cf6'
 TWILIO_AUTH_TOKEN = '1770fed861f4293401c8a67add3c2fe6'
@@ -23,20 +26,10 @@ class CustomerViewSet(viewsets.ModelViewSet):
     serializer_class = CustomerSerializer
     
     @action(detail=True, methods=['get'])
-    def check_discount(self, request, pk=None):
-        # ну это короче мини-калькулятор скидки
-        customer = self.get_object()
-        discount = 0
-        if customer.total_spent >= 100:
-            discount = 10
-        elif customer.total_spent >= 50:
-            discount = 5
-            
-        return Response({
-            'customer_id': customer.customer_id,
-            'total_spent': float(customer.total_spent),
-            'discount_percentage': discount
-        })
+    def check_discount(request, customer_id):
+        customer = Customer.objects.get(id=customer_id)
+        discount = customer.get_discount_percentage()
+        return JsonResponse({"discount_percentage": discount})
     
     def orders(self,request,pk=None):
         customer = self.get_object()
@@ -105,43 +98,45 @@ def verify_code(request):
     
     return Response({'success': False,'error' : 'Invalid code'},status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
+@api_view(['POST','GET'])
 def createOrder(request):
-    """
-    Принимает customer_id и сумму заказа, создаёт заказ и начисляет бонусы.
-    """
-    customer_id = request.data.get("customer_id")
-    amount = Decimal(request.data.get("amount", "0"))
+    if request.method == 'POST':
+        customer_id = request.data.get("customer_id")
+        amount = Decimal(request.data.get("amount", "0"))
+        dish_name = request.data.get("dish_name", "Unknown dish")
+        quantity = int(request.data.get("quantity", 1))
 
-    try:
-        customer = Customer.objects.get(customer_id=customer_id)
-    except Customer.DoesNotExist:
-        return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            customer = Customer.objects.get(customer_id=customer_id)
+        except Customer.DoesNotExist:
+            return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        order = Order.objects.create(
+            customer=customer,
+            amount=amount,
+            dish_name=dish_name,
+            quantity=quantity
+        )
+
+        return Response({
+            "message": "Order created",
+            "order_id": order.id,
+            "dish_name": order.dish_name,
+            "quantity": order.quantity,
+            "discount_applied": float(order.bonus_applied),
+            "bonus_earned": float(order.calculate_bonus()),
+            "bonus_balance": float(customer.bonus_balance),
+            "total_spent": float(customer.total_spent),
+            "orders_count": customer.orders_count,
+        }, status=status.HTTP_201_CREATED)
+
+    elif request.method == 'GET':
+        # получение всех существующих заказов
+        orders = Order.objects.all().order_by("-created_at")
+        serializer = OrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     
-    order = Order.objects.create(customer=customer, amount=amount)
-    bonus_percent = 0
 
-    if 500000 <= amount < 1000000:
-        bonus_percent = 5
-    elif 1000000 <= amount < 3000000:
-        bonus_percent = 10
-    elif amount >= 3000000:
-        bonus_percent = 15
-
-    bonus_added = amount * Decimal(bonus_percent) / Decimal(100)
-    customer.bonus_balance += bonus_added
-    customer.total_spent += amount
-    customer.orders_count += 1
-    customer.save()
-
-    return Response({
-        'message':"Order created",
-        'order_id': order.id,
-        'bonus_added': bonus_added,
-        'total_spent': customer.total_spent,
-        'orders_count': customer.orders_count,
-        'bonus_balance': customer.bonus_balance,
-    },status=status.HTTP_201_CREATED)
 @api_view(['GET'])
 def getBalance(request, customer_id):
     # этот эндпоинт по сути чисто чтоб чекнуть баланс чела, сколько потратил и бонусов накопил
@@ -225,3 +220,148 @@ def verifyCode(request):
         })
 
     return Response({'success': False, 'message': 'Customer not found'}, status=400)
+
+@api_view(['GET'])
+def popularDishes(request):
+    """
+    Возвращает список самых популярных блюд среди всех заказов
+    """
+    popular_dishes = (
+        Order.objects
+        .values('dish_name') 
+        .annotate(
+            total_orders=Count('id'),
+            total_quantity=Sum('quantity'),
+            total_revenue=Sum('amount')
+        )
+        .order_by('-total_quantity')[:10]
+    )
+
+    result = []
+    for rank, dish in enumerate(popular_dishes, start=1):
+        result.append({
+            "rank": rank,
+            "name": dish["dish_name"],
+            "total_orders": dish["total_orders"],
+            "total_quantity": dish["total_quantity"],
+            "total_revenue": float(dish["total_revenue"])
+        })
+
+    return Response(result)
+
+@api_view(['POST'])
+def createOrderWithDishes(request):
+    """
+    Создает заказ с несколькими блюдами
+    """
+    customer_id = request.data.get("customer_id")
+    dishes = request.data.get("dishes",[])
+    
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+    except Customer.DoesNotExist:
+        return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+    
+    total_amount = Decimal('0')
+    created_orders = []
+
+    for dish_data in dishes:
+        dish_name = dish_data.get("dish_name", "Unknown dish")
+        quantity = int(dish_data.get("quantity", 1))
+        price = Decimal(dish_data.get("price", "0"))
+        
+        order = Order.objects.create(
+            customer=customer,
+            amount=price * quantity,
+            dish_name=dish_name,
+            quantity=quantity
+        )
+        
+        total_amount += order.amount
+        created_orders.append({
+            "dish_name": order.dish_name,
+            "quantity": order.quantity,
+            "amount": float(order.amount)
+        })
+    
+    return Response({
+        'message': "Orders created successfully",
+        'total_amount': float(total_amount),
+        'orders_count': len(created_orders),
+        'orders': created_orders,
+        'bonus_balance': float(customer.bonus_balance),
+        'total_spent': float(customer.total_spent)
+    }, status=status.HTTP_201_CREATED)
+
+@api_view(['GET'])
+def check_customer(request, customer_id):
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+        serializer = CustomerSerializer(customer)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Customer.DoesNotExist:
+        return Response({'error': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['GET'])
+def customer_profile(request, customer_id):
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+        serializer = CustomerDetailSerializer(customer)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Customer.DoesNotExist:
+        return Response({'error': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def redeem_bonus(request, customer_id):
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+        amount = request.data.get('amount')
+
+        if amount == "all":
+            customer.bonus_balance = 0
+            customer.save()
+            return Response({'success': True, 'message': 'Все бонусы списаны'}, status=status.HTTP_200_OK)
+
+        try:
+            amount = int(amount)
+        except:
+            return Response({'error': 'Неверное значение бонусов'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0 or amount > customer.bonus_balance:
+            return Response({'error': 'Недостаточно бонусов'}, status=status.HTTP_400_BAD_REQUEST)
+
+        customer.bonus_balance -= amount
+        customer.save()
+        return Response({'success': True, 'message': f'Списано {amount} бонусов'}, status=status.HTTP_200_OK)
+
+    except Customer.DoesNotExist:
+        return Response({'error': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
+    
+@api_view(['POST'])
+def add_bonus(request, customer_id):
+    """
+    Пополнение бонусного баланса клиента
+    """
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+        amount = request.data.get('amount')
+
+        try:
+            amount = int(amount)
+        except:
+            return Response({'error': 'Неверное значение бонусов'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0:
+            return Response({'error': 'Сумма должна быть положительной'}, status=status.HTTP_400_BAD_REQUEST)
+
+        customer.bonus_balance += amount
+        customer.save()
+
+        return Response({
+            'success': True,
+            'message': f'Пополнено {amount} бонусов',
+            'bonus_balance': float(customer.bonus_balance)
+        }, status=status.HTTP_200_OK)
+
+    except Customer.DoesNotExist:
+        return Response({'error': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)

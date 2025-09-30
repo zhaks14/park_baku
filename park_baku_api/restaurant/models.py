@@ -11,7 +11,14 @@ class Customer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     bonus_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     
-    
+    def get_discount_percentage(self):
+        if self.total_spent >= 30000:
+            return 15
+        elif self.total_spent >= 10000:
+            return 10
+        elif self.total_spent >= 5000:
+            return 5
+        return 0
     def __str__(self):
         return f'{self.customer_id} - {self.user.username}'
 
@@ -22,28 +29,23 @@ class Order(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     bonus_applied = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    
+    dish_name = models.CharField(max_length=255,default="Unknown dish")
+    quantity = models.PositiveIntegerField(default=1)
     class Meta:
         ordering = ['-created_at']
     
-    def save(self,*args,**kwargs):
-        # прикол,если заказ новый (нет id), то сразу считаем бонусы и апдейтим клиента
-        if not self.pk:
-            bonus = self.calculate_bonus()
-            self.customer.bonus_balance += bonus
-            self.customer.total_spent += self.amount
-            self.customer.save()
+    def save(self, *args, **kwargs):
+        discount = self.customer.get_discount_percentage()
+        if discount > 0:
+            self.amount = self.amount * (Decimal(100) - Decimal(discount)) / Decimal(100)
+
         super().save(*args, **kwargs)
+        self.customer.total_spent += self.amount
+        self.customer.save()
 
     def calculate_bonus(self):
-        # тут короче чем больше тратишь, тем жирнее бонус
-        if self.amount >= 3_000_000:
-            return Decimal(self.amount) * Decimal('0.15')
-        elif self.amount >= 1_000_000:
-            return Decimal(self.amount) * Decimal('0.10')
-        elif self.amount >= 500_000:
-            return Decimal(self.amount) * Decimal('0.05')
-        return Decimal('0')
+        discount = self.customer.get_discount_percentage()
+        return (self.amount * Decimal(discount) / Decimal(100)).quantize(Decimal("0.01"))
     
     def __str__(self):
         return f"{self.customer.customer_id} - ${self.amount} - {self.created_at.strftime('%Y-%m-%d')}" 

@@ -11,4 +11,10 @@ class CustomerSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
-        fields = ["id", "customer", "amount", "created_at"]
+        fields = ["id", "customer", "dish_name", "quantity", "amount", "bonus_applied", "created_at"]
+class CustomerDetailSerializer(serializers.ModelSerializer):
+    orders = OrderSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Customer
+        fields = ['customer_id', 'phone', 'bonus_balance', 'total_spent', 'orders']
