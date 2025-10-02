@@ -40,7 +40,11 @@ class Order(models.Model):
             self.amount = self.amount * (Decimal(100) - Decimal(discount)) / Decimal(100)
 
         super().save(*args, **kwargs)
+
+        # обновление статистики клиента
         self.customer.total_spent += self.amount
+        self.customer.orders_count = self.customer.orders.count()
+        self.customer.bonus_balance += self.calculate_bonus()
         self.customer.save()
 
     def calculate_bonus(self):

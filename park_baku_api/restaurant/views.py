@@ -16,6 +16,7 @@ from twilio.rest import Client
 from decimal import Decimal
 from django.db.models import Sum,Count
 from django.http import JsonResponse
+from .iiko_service import get_order_by_id
 
 TWILIO_ACCOUNT_SID = 'AC44b190420e71038a0d88e11bfe809cf6'
 TWILIO_AUTH_TOKEN = '1770fed861f4293401c8a67add3c2fe6'
@@ -321,7 +322,12 @@ def redeem_bonus(request, customer_id):
             customer.bonus_balance = 0
             customer.save()
             return Response({'success': True, 'message': 'Все бонусы списаны'}, status=status.HTTP_200_OK)
-
+        else:
+            amount = int(amount)
+            if amount > customer.bonus_balance:
+                return Response({"success": False, "error": "Недостаточно бонусов"}, status=400)
+            redeemed = amount
+            customer.bonus_balance -= amount
         try:
             amount = int(amount)
         except:
@@ -365,3 +371,80 @@ def add_bonus(request, customer_id):
 
     except Customer.DoesNotExist:
         return Response({'error': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
+    
+@api_view(['POST'])
+def iiko_order_webhook(request):
+    """
+    Принимает заказ из iiko WebKassa и сохраняет его в систему бонусов.
+    Ожидает:
+    {
+      "customer_id": "C1234",
+      "dishes": [
+        {"dish_name": "Пицца Маргарита", "quantity": 2, "price": "1500"},
+        {"dish_name": "Кола", "quantity": 1, "price": "500"}
+      ]
+    }
+    """
+    customer_id = request.data.get("customer_id")
+    dishes = request.data.get("dishes", [])
+
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+    except Customer.DoesNotExist:
+        return Response({"error": "Customer not found"}, status=404)
+
+    total_amount = Decimal("0")
+    created_orders = []
+
+    for dish in dishes:
+        name = dish.get("dish_name", "Unknown dish")
+        qty = int(dish.get("quantity", 1))
+        price = Decimal(dish.get("price", "0"))
+
+        order = Order.objects.create(
+            customer=customer,
+            dish_name=name,
+            quantity=qty,
+            amount=price * qty
+        )
+        created_orders.append({
+            "dish_name": name,
+            "quantity": qty,
+            "amount": float(order.amount)
+        })
+        total_amount += order.amount
+
+    return Response({
+        "success": True,
+        "customer_id": customer.customer_id,
+        "orders": created_orders,
+        "total_amount": float(total_amount),
+        "bonus_balance": float(customer.bonus_balance),
+        "total_spent": float(customer.total_spent)
+    })
+
+@api_view(["POST"])
+def import_order(request):
+    """
+    Привязать заказ из iiko к клиенту
+    request: { "customer_id": 1, "organizationId": "ORG_ID", "orderId": "UUID" }
+    """
+    customer_id = request.data.get("customer_id")
+    org_id = request.data.get("organizationId")
+    order_id = request.data.get("orderId")
+
+    customer = Customer.objects.get(id=customer_id)
+    order_data = get_order_by_id(org_id, order_id)
+
+    iiko_order = order_data["orders"][0]
+    dish_names = [item["product"]["name"] for item in iiko_order["items"]]
+
+    order = Order.objects.create(
+        customer=customer,
+        external_id=order_id,
+        items=", ".join(dish_names),
+        total_price=iiko_order["sum"],
+        created_at=iiko_order["createdAt"]
+    )
+
+    return Response(OrderSerializer(order).data)

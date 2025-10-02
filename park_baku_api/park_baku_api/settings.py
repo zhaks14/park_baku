@@ -38,7 +38,7 @@ ALLOWED_HOSTS = [
     'localhost', 
     '10.0.2.2',
     '0.0.0.0',
-
+    'militantly-unjeopardised-jene.ngrok-free.dev',
 ]
 
 
