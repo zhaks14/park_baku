@@ -39,6 +39,8 @@ ALLOWED_HOSTS = [
     '10.0.2.2',
     '0.0.0.0',
     'militantly-unjeopardised-jene.ngrok-free.dev',
+    'https://militantly-unjeopardised-jene.ngrok-free.dev',
+    'http://militantly-unjeopardised-jene.ngrok-free.dev',
 ]
 
 
