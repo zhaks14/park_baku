@@ -2,7 +2,7 @@ import requests, time
 
 IIKO_LOGIN = "ВАШ_API_LOGIN"
 IIKO_BASE_URL = "https://api-ru.iiko.services/api/1"
-TOKEN_CACHE = {"token": None, "expires": 0}
+TOKEN_CACHE = {"token": "9014bf1230364c329d25186c13b44775", "expires": 0}
 
 
 def get_token():
