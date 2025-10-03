@@ -160,7 +160,9 @@ def orderHistory(request,customer_id):
             "id": order.id,
             "amount": order.amount,
             "bonus_applied": order.bonus_applied,
-            "created_at": order.created_at
+            "created_at": order.created_at,
+            "dish_name": order.dish_name,
+            "quantity": order.quantity,
         } for order in orders])
     except Customer.DoesNotExist:
         return Response({"error": "Customer not found"}, status=404)
@@ -186,7 +188,10 @@ def sendCode(request):
             to=phone
         )
     except Exception as e:
-        return Response({'success': False, 'message': f"Ошибка отправки SMS: {e}"}, status=500)
+        return Response(
+            {'success': False, 'message': f"Twilio error: {str(e)}"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     return Response({'success': True, 'message': 'Code sent'})
 
@@ -397,6 +402,7 @@ def iiko_order_webhook(request):
     created_orders = []
 
     for dish in dishes:
+
         name = dish.get("dish_name", "Unknown dish")
         qty = int(dish.get("quantity", 1))
         price = Decimal(dish.get("price", "0"))
@@ -444,7 +450,38 @@ def import_order(request):
         external_id=order_id,
         items=", ".join(dish_names),
         total_price=iiko_order["sum"],
-        created_at=iiko_order["createdAt"]
+        created_at=iiko_order["createdAt"],
     )
 
     return Response(OrderSerializer(order).data)
+
+@api_view(['POST'])
+def validate_customer_for_cashier(request):
+    """
+    Endpoint для кассиров - проверяет валидность customer_id
+    и возвращает информацию о скидке
+    """
+    customer_id = request.data.get('customer_id', '').upper().strip()
+    
+    if not customer_id:
+        return Response({'error': 'Customer ID required'}, status=400)
+    
+    try:
+        customer = Customer.objects.get(customer_id=customer_id)
+        
+        return Response({
+            'valid': True,
+            'customer_id': customer.customer_id,
+            'customer_name': customer.user.username,
+            'phone': customer.phone,
+            'discount_percentage': customer.get_discount_percentage(),
+            'total_spent': float(customer.total_spent),
+            'orders_count': customer.orders_count,
+            'bonus_balance': float(customer.bonus_balance)
+        })
+        
+    except Customer.DoesNotExist:
+        return Response({
+            'valid': False,
+            'error': f'Клиент с ID {customer_id} не найден'
+        }, status=404)

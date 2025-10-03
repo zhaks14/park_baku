@@ -14,6 +14,15 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+API_WIFI_NAME = "Park_Baku_5G"
+API_WIFI_IP = "192.168.1.140"
+API_PASSWORD = "Park_Baku_2061"
+
+
+# IIKO_WEBHOOK_SECRET = "твой_секрет"
+
+# 192.168.1.140
+
 load_dotenv()
 API_KEY = os.getenv('API_KEY')
 

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Customer, Order
-
+# 10,15,20,30,50
 class CustomerSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     

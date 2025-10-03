@@ -1,10 +1,13 @@
-<<<<<<< HEAD
-# iiko_service.py
 import requests
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import logging
+from django.conf import settings
+IIKO_API_LOGIN="811a90a0-778c-4314-870b-bc9b39bc6621"
+IIKO_API_LOGIN_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBcGlMb2dpbklkIjoiNGZmMmZhN2QtMjUzNC00MTJjLWI1MWUtYWFkMTNiZmViZGY2IiwibmJmIjoxNzU5NDk0NjQ0LCJleHAiOjE3NTk0OTgyNDQsImlhdCI6MTc1OTQ5NDY0NCwiaXNzIjoiaWlrbyIsImF1ZCI6ImNsaWVudHMifQ.udD933wOKIKv1pgcMOc1WLiae_xNWic5oSAR3MPvbI0"
+IIKO_ORG_ID="a2486bd5-0ee4-4d7c-81a0-106ddc0fddf1"
+IIKO_WEBHOOK_SECRET="c7b7c1a0-4e12-4b93-bf82-19a5d4c5c2fa"
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +15,10 @@ class IikoCloudAPI:
     """
     Сервис для интеграции с iiko Cloud API (Transport API)
     """
-    
-    def __init__(self, api_key: str):
+
+    def __init__(self, api_key: str = IIKO_API_LOGIN):
         self.api_key = api_key
-        self.base_url = "https://api-ru.iiko.services"
+        self.base_url = "https://api-ru.iiko.services/api/1"
         self.token = None
         self.token_expires = None
         self.organization_id = None
@@ -25,7 +28,7 @@ class IikoCloudAPI:
         if self.token and self.token_expires and datetime.now() < self.token_expires:
             return self.token
             
-        url = f"{self.base_url}/api/1/access_token"
+        url = f"{self.base_url}/access_token"
         headers = {
             "Content-Type": "application/json"
         }
@@ -34,21 +37,37 @@ class IikoCloudAPI:
         }
         
         try:
-            response = requests.post(url, json=data, headers=headers)
+            logger.info(f"Requesting iiko token with API login: {self.api_key[:20]}...")
+            response = requests.post(url, json=data, headers=headers, timeout=30)
+            
+            logger.info(f"Response status: {response.status_code}")
+            logger.info(f"Response headers: {dict(response.headers)}")
+            
+            if response.status_code == 401:
+                logger.error("iiko API: 401 Unauthorized - Invalid API login")
+                raise Exception("Invalid API login (401 Unauthorized)")
+                
             response.raise_for_status()
             
             result = response.json()
             self.token = result.get('token')
+            
+            if not self.token:
+                logger.error("No token in iiko response")
+                raise Exception("No token in response")
+                
             # Токен действует 1 час
             self.token_expires = datetime.now() + timedelta(hours=1)
             
-            logger.info("Access token obtained successfully")
+            logger.info("iiko access token obtained successfully")
             return self.token
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get access token: {e}")
-            raise
-    
+            logger.error(f"Failed to get iiko access token: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+            raise    
+
     def get_organizations(self) -> List[Dict]:
         """Получение списка организаций"""
         token = self.get_access_token()
@@ -173,6 +192,33 @@ class IikoCloudAPI:
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to get customer balance: {e}")
             return {}
+        
+    def get_order_by_id(self, organization_id: str, order_id: str) -> Dict:
+        """
+        Получение информации о заказе по ID из iiko
+        """
+        token = self.get_access_token()
+        
+        url = f"{self.base_url}/api/1/order"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "organizationId": organization_id,
+            "orderIds": [order_id]
+        }
+        
+        try:
+            response = requests.post(url, json=data, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to get order by ID: {e}")
+            raise
 
 
 class IikoWebhookProcessor:
@@ -248,35 +294,13 @@ class IikoWebhookProcessor:
         }
         
         return payment_info
-=======
-import requests, time
-
-IIKO_LOGIN = "ВАШ_API_LOGIN"
-IIKO_BASE_URL = "https://api-ru.iiko.services/api/1"
-TOKEN_CACHE = {"token": "9014bf1230364c329d25186c13b44775", "expires": 0}
 
 
-def get_token():
-    now = time.time()
-    if TOKEN_CACHE["token"] and TOKEN_CACHE["expires"] > now:
-        return TOKEN_CACHE["token"]
-
-    url = f"{IIKO_BASE_URL}/access_token"
-    res = requests.post(url, json={"apiLogin": IIKO_LOGIN})
-    res.raise_for_status()
-    token = res.json()["token"]
-
-    TOKEN_CACHE["token"] = token
-    TOKEN_CACHE["expires"] = now + 3600
-    return token
-
-
-def get_order_by_id(org_id, order_id):
-    token = get_token()
-    url = f"{IIKO_BASE_URL}/orders/by_id"
-    headers = {"Authorization": f"Bearer {token}"}
-    data = {"organizationId": org_id, "orderIds": [order_id]}
-    res = requests.post(url, headers=headers, json=data)
-    res.raise_for_status()
-    return res.json()
->>>>>>> a27622938a0bed85ff5b0c85e0039380ca092425
+def get_order_by_id(organization_id: str, order_id: str) -> Dict:
+    """
+    Получение информации о заказе по ID из iiko
+    """
+    # Предполагается, что API ключ хранится в настройках Django
+    api_key = getattr(settings, 'IIKO_API_KEY', 'your_default_api_key_here')
+    api = IikoCloudAPI(api_key)
+    return api.get_order_by_id(organization_id, order_id)

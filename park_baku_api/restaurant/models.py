@@ -10,7 +10,9 @@ class Customer(models.Model):
     orders_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     bonus_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    
+    iiko_customer_id = models.CharField(max_length=255, blank=True, null=True)
+    is_synced_with_iiko = models.BooleanField(default=False)
+
     def get_discount_percentage(self):
         if self.total_spent >= 30000:
             return 15
@@ -31,6 +33,10 @@ class Order(models.Model):
     bonus_applied = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     dish_name = models.CharField(max_length=255,default="Unknown dish")
     quantity = models.PositiveIntegerField(default=1)
+    external_id = models.CharField(max_length=255, blank=True, null=True)  # ID заказа в iiko
+    iiko_organization_id = models.CharField(max_length=255, blank=True, null=True)
+    is_synced = models.BooleanField(default=False)
+
     class Meta:
         ordering = ['-created_at']
     
