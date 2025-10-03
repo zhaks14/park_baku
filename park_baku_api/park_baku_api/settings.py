@@ -10,12 +10,20 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+API_KEY = os.getenv('API_KEY')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
+# это для настройки отправки сообщений для регистрации через смс
+TWILIO_ACCOUNT_SID = 'AC44b190420e71038a0d88e11bfe809cf6'
+TWILIO_AUTH_TOKEN = '1770fed861f4293401c8a67add3c2fe6'
+TWILIO_PHONE_NUMBER = '+18592377972'
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -28,9 +36,11 @@ DEBUG = True
 ALLOWED_HOSTS = [   
     '127.0.0.1',
     'localhost', 
-    '10.0.2.2',  # Для Android эмулятора
-    '0.0.0.0',   # Для любых локальных подключений
-
+    '10.0.2.2',
+    '0.0.0.0',
+    'militantly-unjeopardised-jene.ngrok-free.dev',
+    'https://militantly-unjeopardised-jene.ngrok-free.dev',
+    'http://militantly-unjeopardised-jene.ngrok-free.dev',
 ]
 
 
