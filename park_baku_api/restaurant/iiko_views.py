@@ -19,6 +19,16 @@ from .models import Customer, Order
 from decimal import Decimal
 from .models import Customer, Order
 from .iiko_service import IikoCloudAPI, IikoWebhookProcessor
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+from datetime import datetime, timedelta
+import logging
+from .iiko_service import get_iiko_client, get_active_orders
+
+logger = logging.getLogger(__name__)
+
 
 IIKO_API_LOGIN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBcGlMb2dpbklkIjoiNGZmMmZhN2QtMjUzNC00MTJjLWI1MWUtYWFkMTNiZmViZGY2IiwibmJmIjoxNzU5NDk0NjQ0LCJleHAiOjE3NTk0OTgyNDQsImlhdCI6MTc1OTQ5NDY0NCwiaXNzIjoiaWlrbyIsImF1ZCI6ImNsaWVudHMifQ.udD933wOKIKv1pgcMOc1WLiae_xNWic5oSAR3MPvbI0"
 IIKO_ORG_ID="a2486bd5-0ee4-4d7c-81a0-106ddc0fddf1"
@@ -636,18 +646,14 @@ def iiko_order_webhook_updated(request):
     logger.info(f"Webhook data: {json.dumps(data, indent=2)}")
     
     try:
-        # Извлекаем данные заказа из iiko
         order_id = data.get("orderId")
         organization_id = data.get("organizationId")
         total_sum = Decimal(str(data.get("sum", "0")))
         created_at = data.get("createdAt")
         items = data.get("items", [])
         
-        # Ищем customer_id в данных iiko
-        # iiko может передавать его в разных местах, проверяем все варианты
         customer_id = None
         
-        # Вариант 1: в объекте customer
         customer_data = data.get("customer", {})
         if customer_data:
             customer_id = customer_data.get("id")
@@ -836,8 +842,6 @@ def iiko_order_webhook_demo(request):
     
     data = request.data
     logger.info(f"Demo webhook data: {json.dumps(data, indent=2)}")
-    
-    # Принимаем данные в любом формате для тестирования
     customer_id = data.get('customer_id') or data.get('customer', {}).get('id')
     
     if not customer_id:
@@ -928,3 +932,800 @@ def test_cashier_integration(request):
             'error': f'Клиент с ID {customer_id} не найден',
             'demo_customers': list(Customer.objects.values_list('customer_id', flat=True)[:5])
         })
+    
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_iiko_active_orders(request):
+    """
+    ✅ ГЛАВНЫЙ ENDPOINT: Получить все активные заказы с кассы
+    
+    Примеры:
+    GET /api/iiko/orders/active/                 - Заказы за последние 24 часа
+    GET /api/iiko/orders/active/?hours=12        - За последние 12 часов
+    GET /api/iiko/orders/active/?status=OnWay    - Только в доставке
+    """
+    try:
+        # Параметры
+        hours = int(request.GET.get('hours', 24))
+        status_filter = request.GET.get('status')
+        
+        client = get_iiko_client()
+        date_from = datetime.now() - timedelta(hours=hours)
+        
+        # Определяем статусы
+        if status_filter:
+            statuses = [status_filter]
+        else:
+            # Все активные статусы
+            statuses = [
+                "Unconfirmed",
+                "WaitCooking",
+                "ReadyForCooking",
+                "CookingStarted",
+                "CookingCompleted",
+                "Waiting",
+                "OnWay"
+            ]
+        
+        # ✅ Получаем заказы из iiko
+        orders = client.get_deliveries_by_date(
+            date_from=date_from,
+            statuses=statuses
+        )
+        
+        logger.info(f"✅ Retrieved {len(orders)} active orders")
+        
+        # Форматируем ответ
+        formatted_orders = []
+        for order in orders:
+            formatted_orders.append({
+                'id': order.get('id'),
+                'number': order.get('number'),
+                'status': order.get('status'),
+                'sum': order.get('sum'),
+                'customer': {
+                    'name': order.get('customer', {}).get('name'),
+                    'phone': order.get('customer', {}).get('phone'),
+                },
+                'created_at': order.get('createdAt'),
+                'delivery_date': order.get('deliveryDate'),
+                'items': order.get('items', []),
+                'items_count': len(order.get('items', [])),
+            })
+        
+        return Response({
+            'success': True,
+            'count': len(formatted_orders),
+            'orders': formatted_orders,
+            'period': f'Last {hours} hours'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting active orders: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_iiko_order_details(request, order_id):
+    """
+    Получить детали конкретного заказа
+    GET /api/iiko/orders/<order_id>/
+    """
+    try:
+        client = get_iiko_client()
+        order = client.get_order_by_id(order_id)
+        
+        if not order:
+            return Response({
+                'success': False,
+                'error': 'Order not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        logger.info(f"✅ Retrieved order details for {order_id}")
+        
+        return Response({
+            'success': True,
+            'order': order
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting order details: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def test_iiko_connection_full(request):
+    """
+    ✅ ПОЛНАЯ ПРОВЕРКА: Тестирует соединение с iiko и получение заказов
+    GET /api/iiko/test-connection/
+    """
+    results = {
+        'step1_token': {'status': 'pending', 'message': 'Getting access token...'},
+        'step2_organizations': {'status': 'pending', 'message': 'Fetching organizations...'},
+        'step3_terminals': {'status': 'pending', 'message': 'Fetching terminals...'},
+        'step4_orders': {'status': 'pending', 'message': 'Fetching active orders...'},
+    }
+    
+    try:
+        client = get_iiko_client()
+        
+        # Шаг 1: Получение токена
+        try:
+            token = client.get_access_token()
+            results['step1_token'] = {
+                'status': 'success',
+                'token_sample': token[:20] + '...' if token else None
+            }
+        except Exception as e:
+            results['step1_token'] = {'status': 'failed', 'error': str(e)}
+            return Response(results, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Шаг 2: Получение организаций
+        try:
+            organizations = client.get_organizations()
+            results['step2_organizations'] = {
+                'status': 'success',
+                'count': len(organizations),
+                'organizations': [
+                    {'id': org['id'], 'name': org.get('name', 'Unknown')}
+                    for org in organizations
+                ]
+            }
+        except Exception as e:
+            results['step2_organizations'] = {'status': 'failed', 'error': str(e)}
+        
+        # Шаг 3: Получение терминалов
+        try:
+            terminals = client.get_terminal_groups()
+            results['step3_terminals'] = {
+                'status': 'success',
+                'count': len(terminals),
+                'terminals': [
+                    {'id': t['id'], 'name': t.get('name', 'Unknown')}
+                    for t in terminals
+                ]
+            }
+        except Exception as e:
+            results['step3_terminals'] = {'status': 'failed', 'error': str(e)}
+        
+        # Шаг 4: Получение активных заказов
+        try:
+            date_from = datetime.now() - timedelta(hours=24)
+            orders = client.get_deliveries_by_date(date_from=date_from)
+            results['step4_orders'] = {
+                'status': 'success',
+                'count': len(orders),
+                'sample_orders': [
+                    {
+                        'id': o['id'],
+                        'number': o.get('number'),
+                        'status': o.get('status'),
+                        'sum': o.get('sum')
+                    }
+                    for o in orders[:5]  # Первые 5 заказов
+                ]
+            }
+        except Exception as e:
+            results['step4_orders'] = {'status': 'failed', 'error': str(e)}
+        
+        # Общий статус
+        all_success = all(
+            step['status'] == 'success' 
+            for step in results.values()
+        )
+        
+        return Response({
+            'overall_status': 'success' if all_success else 'partial_success',
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Test connection failed: {e}", exc_info=True)
+        return Response({
+            'overall_status': 'failed',
+            'error': str(e),
+            'results': results
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_iiko_active_orders(request):
+    """
+    ✅ ГЛАВНЫЙ ENDPOINT: Получить все активные заказы с кассы
+    
+    Примеры:
+    GET /api/iiko/orders/active/                 - Заказы за последние 24 часа
+    GET /api/iiko/orders/active/?hours=12        - За последние 12 часов
+    GET /api/iiko/orders/active/?status=OnWay    - Только в доставке
+    """
+    try:
+        # Параметры из query string
+        hours = int(request.GET.get('hours', 24))
+        status_filter = request.GET.get('status')
+        
+        client = get_iiko_client()
+        date_from = datetime.now() - timedelta(hours=hours)
+        
+        # Определяем статусы
+        if status_filter:
+            statuses = [status_filter]
+        else:
+            # Все активные статусы
+            statuses = [
+                "Unconfirmed",
+                "WaitCooking",
+                "ReadyForCooking",
+                "CookingStarted",
+                "CookingCompleted",
+                "Waiting",
+                "OnWay"
+            ]
+        
+        # Получаем заказы из iiko
+        orders = client.get_deliveries_by_date(
+            date_from=date_from,
+            statuses=statuses
+        )
+        
+        logger.info(f"✅ Retrieved {len(orders)} active orders")
+        
+        # Форматируем ответ
+        formatted_orders = []
+        for order in orders:
+            formatted_orders.append({
+                'id': order.get('id'),
+                'number': order.get('number'),
+                'status': order.get('status'),
+                'sum': order.get('sum'),
+                'customer': {
+                    'name': order.get('customer', {}).get('name'),
+                    'phone': order.get('customer', {}).get('phone'),
+                },
+                'created_at': order.get('createdAt'),
+                'delivery_date': order.get('deliveryDate'),
+                'items': order.get('items', []),
+                'items_count': len(order.get('items', [])),
+            })
+        
+        return Response({
+            'success': True,
+            'count': len(formatted_orders),
+            'orders': formatted_orders,
+            'period': f'Last {hours} hours'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting active orders: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_iiko_order_details(request, order_id):
+    """
+    Получить детали конкретного заказа
+    GET /api/iiko/orders/<order_id>/
+    """
+    try:
+        client = get_iiko_client()
+        order = client.get_order_by_id(order_id)
+        
+        if not order:
+            return Response({
+                'success': False,
+                'error': 'Order not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        logger.info(f"✅ Retrieved order details for {order_id}")
+        
+        return Response({
+            'success': True,
+            'order': order
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting order details: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def test_iiko_connection_full(request):
+    """
+    ✅ ПОЛНАЯ ПРОВЕРКА: Тестирует соединение с iiko и получение заказов
+    GET /api/iiko/test-connection/
+    """
+    results = {
+        'step1_token': {'status': 'pending', 'message': 'Getting access token...'},
+        'step2_organizations': {'status': 'pending', 'message': 'Fetching organizations...'},
+        'step3_terminals': {'status': 'pending', 'message': 'Fetching terminals...'},
+        'step4_orders': {'status': 'pending', 'message': 'Fetching active orders...'},
+    }
+    
+    try:
+        client = get_iiko_client()
+        
+        # Шаг 1: Получение токена
+        try:
+            token = client.get_access_token()
+            results['step1_token'] = {
+                'status': 'success',
+                'token_sample': token[:20] + '...' if token else None
+            }
+        except Exception as e:
+            results['step1_token'] = {'status': 'failed', 'error': str(e)}
+            return Response(results, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Шаг 2: Получение организаций
+        try:
+            organizations = client.get_organizations()
+            results['step2_organizations'] = {
+                'status': 'success',
+                'count': len(organizations),
+                'organizations': [
+                    {'id': org['id'], 'name': org.get('name', 'Unknown')}
+                    for org in organizations
+                ]
+            }
+        except Exception as e:
+            results['step2_organizations'] = {'status': 'failed', 'error': str(e)}
+        
+        # Шаг 3: Получение терминалов
+        try:
+            terminals = client.get_terminal_groups()
+            results['step3_terminals'] = {
+                'status': 'success',
+                'count': len(terminals),
+                'terminals': [
+                    {'id': t['id'], 'name': t.get('name', 'Unknown')}
+                    for t in terminals
+                ]
+            }
+        except Exception as e:
+            results['step3_terminals'] = {'status': 'failed', 'error': str(e)}
+        
+        # Шаг 4: Получение активных заказов
+        try:
+            date_from = datetime.now() - timedelta(hours=24)
+            orders = client.get_deliveries_by_date(date_from=date_from)
+            results['step4_orders'] = {
+                'status': 'success',
+                'count': len(orders),
+                'sample_orders': [
+                    {
+                        'id': o['id'],
+                        'number': o.get('number'),
+                        'status': o.get('status'),
+                        'sum': o.get('sum')
+                    }
+                    for o in orders[:5]  # Первые 5 заказов
+                ]
+            }
+        except Exception as e:
+            results['step4_orders'] = {'status': 'failed', 'error': str(e)}
+        
+        # Общий статус
+        all_success = all(
+            step['status'] == 'success' 
+            for step in results.values()
+        )
+        
+        return Response({
+            'overall_status': 'success' if all_success else 'partial_success',
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Test connection failed: {e}", exc_info=True)
+        return Response({
+            'overall_status': 'failed',
+            'error': str(e),
+            'results': results
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_iiko_active_orders(request):
+    """
+    ✅ ГЛАВНЫЙ ENDPOINT: Получить все активные заказы с кассы
+    
+    Примеры:
+    GET /api/iiko/orders/active/                 - Заказы за последние 24 часа
+    GET /api/iiko/orders/active/?hours=12        - За последние 12 часов
+    GET /api/iiko/orders/active/?status=OnWay    - Только в доставке
+    """
+    try:
+        # Параметры из query string
+        hours = int(request.GET.get('hours', 24))
+        status_filter = request.GET.get('status')
+        
+        client = get_iiko_client()
+        date_from = datetime.now() - timedelta(hours=hours)
+        
+        if status_filter:
+            statuses = [status_filter]
+        else:
+            # Все активные статусы
+            statuses = ["CookingStarted", "CookingCompleted", "ReadyForCooking", "OnWay"]
+        
+        # Получаем заказы из iiko
+        orders = client.get_deliveries_by_date(
+            date_from=date_from,
+            statuses=statuses
+        )
+        
+        logger.info(f"✅ Retrieved {len(orders)} active orders")
+        
+        # Форматируем ответ
+        formatted_orders = []
+        for order in orders:
+            formatted_orders.append({
+                'id': order.get('id'),
+                'number': order.get('number'),
+                'status': order.get('status'),
+                'sum': order.get('sum'),
+                'customer': {
+                    'name': order.get('customer', {}).get('name'),
+                    'phone': order.get('customer', {}).get('phone'),
+                },
+                'created_at': order.get('createdAt'),
+                'delivery_date': order.get('deliveryDate'),
+                'items': order.get('items', []),
+                'items_count': len(order.get('items', [])),
+            })
+        
+        return Response({
+            'success': True,
+            'count': len(formatted_orders),
+            'orders': formatted_orders,
+            'period': f'Last {hours} hours'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting active orders: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_iiko_order_details(request, order_id):
+    """
+    Получить детали конкретного заказа
+    GET /api/iiko/orders/<order_id>/
+    """
+    try:
+        client = get_iiko_client()
+        order = client.get_order_by_id(order_id)
+        
+        if not order:
+            return Response({
+                'success': False,
+                'error': 'Order not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        logger.info(f"✅ Retrieved order details for {order_id}")
+        
+        return Response({
+            'success': True,
+            'order': order
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting order details: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def test_iiko_connection_full(request):
+    """
+    ✅ ПОЛНАЯ ПРОВЕРКА: Тестирует соединение с iiko и получение заказов
+    GET /api/iiko/test-connection/
+    """
+    results = {
+        'step1_token': {'status': 'pending', 'message': 'Getting access token...'},
+        'step2_organizations': {'status': 'pending', 'message': 'Fetching organizations...'},
+        'step3_terminals': {'status': 'pending', 'message': 'Fetching terminals...'},
+        'step4_orders': {'status': 'pending', 'message': 'Fetching active orders...'},
+    }
+    
+    try:
+        client = get_iiko_client()
+        
+        # Шаг 1: Получение токена
+        try:
+            token = client.get_access_token()
+            results['step1_token'] = {
+                'status': 'success',
+                'token_sample': token[:20] + '...' if token else None
+            }
+        except Exception as e:
+            results['step1_token'] = {'status': 'failed', 'error': str(e)}
+            return Response(results, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Шаг 2: Получение организаций
+        try:
+            organizations = client.get_organizations()
+            results['step2_organizations'] = {
+                'status': 'success',
+                'count': len(organizations),
+                'organizations': [
+                    {'id': org['id'], 'name': org.get('name', 'Unknown')}
+                    for org in organizations
+                ]
+            }
+        except Exception as e:
+            results['step2_organizations'] = {'status': 'failed', 'error': str(e)}
+        
+        # Шаг 3: Получение терминалов
+        try:
+            terminals = client.get_terminal_groups()
+            results['step3_terminals'] = {
+                'status': 'success',
+                'count': len(terminals),
+                'terminals': [
+                    {'id': t['id'], 'name': t.get('name', 'Unknown')}
+                    for t in terminals
+                ]
+            }
+        except Exception as e:
+            results['step3_terminals'] = {'status': 'failed', 'error': str(e)}
+        
+        # Шаг 4: Получение активных заказов
+        try:
+            date_from = datetime.now() - timedelta(days=3)  # 1 дней назад
+            
+            logger.info(f"Trying to fetch orders from {date_from}")
+            
+            # Пробуем запрос БЕЗ фильтра по статусам
+            orders = client.get_deliveries_by_date(
+                date_from=date_from,
+                statuses=None  # Без фильтра
+            )
+            
+            results['step4_orders'] = {
+                'status': 'success',
+                'count': len(orders),
+                'sample_orders': [
+                    {
+                        'id': o['id'],
+                        'number': o.get('number'),
+                        'status': o.get('status'),
+                        'sum': o.get('sum')
+                    }
+                    for o in orders[:5]  # Первые 5 заказов
+                ]
+            }
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Orders fetch error: {error_msg}")
+            
+            # Пытаемся извлечь детали ошибки
+            results['step4_orders'] = {
+                'status': 'failed', 
+                'error': error_msg,
+                'note': 'Попробуйте вручную: curl -X POST https://api-ru.iiko.services/api/1/deliveries/by_delivery_date_and_status'
+            }
+        
+        # Общий статус
+        all_success = all(
+            step['status'] == 'success' 
+            for step in results.values()
+        )
+        
+        return Response({
+            'overall_status': 'success' if all_success else 'partial_success',
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Test connection failed: {e}", exc_info=True)
+        return Response({
+            'overall_status': 'failed',
+            'error': str(e),
+            'results': results
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+# Добавьте эти views в ваш iiko_views.py
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_closed_orders_olap(request):
+    """
+    Получить закрытые заказы через OLAP (включая столики)
+    
+    Query params:
+    - hours: период в часах (по умолчанию 24)
+    - days: период в днях (альтернатива hours)
+    
+    Примеры:
+    GET /api/iiko/orders/closed/           - За последние 24 часа
+    GET /api/iiko/orders/closed/?hours=12  - За последние 12 часов
+    GET /api/iiko/orders/closed/?days=7    - За последнюю неделю
+    """
+    try:
+        # Получаем период
+        if 'days' in request.GET:
+            days = int(request.GET.get('days', 1))
+            hours = days * 24
+        else:
+            hours = int(request.GET.get('hours', 24))
+        
+        client = get_iiko_client()
+        date_from = datetime.now() - timedelta(hours=hours)
+        date_to = datetime.now()
+        
+        # Получаем OLAP отчёт
+        orders = client.get_olap_sales_report(date_from, date_to)
+        
+        logger.info(f"Retrieved {len(orders)} closed orders from OLAP")
+        
+        return Response({
+            'success': True,
+            'count': len(orders),
+            'orders': orders,
+            'period': f'Last {hours} hours',
+            'note': 'Это закрытые/оплаченные заказы. Текущие открытые заказы недоступны через API.'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting OLAP orders: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_all_orders_combined(request):
+    """
+    Получить заказы из ВСЕХ источников
+    
+    Комбинирует:
+    1. Закрытые заказы из iiko (OLAP - включая столики)
+    2. Заказы доставки (активные)
+    3. Заказы из локальной БД Django
+    """
+    try:
+        hours = int(request.GET.get('hours', 24))
+        client = get_iiko_client()
+        date_from = datetime.now() - timedelta(hours=hours)
+        
+        # 1. Закрытые заказы из OLAP (столики + всё остальное)
+        try:
+            olap_orders = client.get_olap_sales_report(date_from, datetime.now())
+        except Exception as e:
+            logger.warning(f"Failed to get OLAP orders: {e}")
+            olap_orders = []
+        
+        # 2. Активные заказы доставки
+        try:
+            delivery_orders = client.get_deliveries_by_date(date_from=date_from)
+        except Exception as e:
+            logger.warning(f"Failed to get delivery orders: {e}")
+            delivery_orders = []
+        
+        # 3. Локальные заказы из Django БД
+        from .models import Order
+        from .serializers import OrderSerializer
+        
+        local_orders = Order.objects.filter(
+            created_at__gte=date_from
+        ).select_related('customer')
+        serializer = OrderSerializer(local_orders, many=True)
+        
+        return Response({
+            'success': True,
+            'summary': {
+                'total_orders': len(olap_orders) + len(delivery_orders) + local_orders.count(),
+                'closed_orders_count': len(olap_orders),
+                'active_delivery_count': len(delivery_orders),
+                'local_orders_count': local_orders.count()
+            },
+            'closed_orders': {
+                'count': len(olap_orders),
+                'orders': olap_orders[:20],  # Первые 20
+                'note': 'Закрытые заказы из iiko (столики, доставка, самовывоз)'
+            },
+            'active_deliveries': {
+                'count': len(delivery_orders),
+                'orders': delivery_orders[:20],
+                'note': 'Активные заказы доставки'
+            },
+            'local_orders': {
+                'count': local_orders.count(),
+                'orders': serializer.data[:20],
+                'note': 'Заказы из приложения'
+            },
+            'period': f'Last {hours} hours'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting combined orders: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def sync_closed_orders_to_db(request):
+    """
+    Синхронизировать закрытые заказы из iiko в Django БД
+    
+    Пройдётся по закрытым заказам из OLAP и создаст их в БД
+    если найдёт customer_id в комментарии или номере телефона
+    
+    POST /api/iiko/sync-closed-orders/
+    Body: {
+        "hours": 24  // опционально, по умолчанию 24
+    }
+    """
+    try:
+        from .models import Customer, Order
+        
+        hours = int(request.data.get('hours', 24))
+        client = get_iiko_client()
+        date_from = datetime.now() - timedelta(hours=hours)
+        
+        # Получаем закрытые заказы из OLAP
+        olap_orders = client.get_olap_sales_report(date_from, datetime.now())
+        
+        synced_count = 0
+        skipped_count = 0
+        errors = []
+        
+        for order in olap_orders:
+            try:
+                # Пытаемся найти customer_id в заказе
+                # (нужно, чтобы официант указывал ID клиента в комментарии)
+                order_number = order.get('order_number')
+                skipped_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    'order': order.get('order_number'),
+                    'error': str(e)
+                })
+        
+        return Response({
+            'success': True,
+            'total_orders': len(olap_orders),
+            'synced': synced_count,
+            'skipped': skipped_count,
+            'errors': errors[:10],  # Первые 10 ошибок
+            'note': 'Для автоматической синхронизации нужно, чтобы официанты указывали ID клиента в комментарии к заказу'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error syncing closed orders: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

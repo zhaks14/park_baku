@@ -401,6 +401,7 @@ def iiko_order_webhook(request):
     total_amount = Decimal("0")
     created_orders = []
 
+
     for dish in dishes:
 
         name = dish.get("dish_name", "Unknown dish")
