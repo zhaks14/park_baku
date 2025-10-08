@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
 API_WIFI_NAME = "Park_Baku_5G"
 API_WIFI_IP = "192.168.1.140"
@@ -23,8 +23,8 @@ API_PASSWORD = "Park_Baku_2061"
 
 # 192.168.1.140
 
-load_dotenv()
-API_KEY = os.getenv('API_KEY')
+# load_dotenv()
+# API_KEY = os.getenv('API_KEY')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -158,3 +158,6 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+PORT = os.environ.get("PORT", "8000")
