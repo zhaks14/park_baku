@@ -41,12 +41,15 @@ SECRET_KEY = 'django-insecure-6q$3#n#)ln651rh-(dg^^-syf@9rtms@icdap0bb+h45iv6qoh
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-
+CORS_ALLOW_ALL_ORIGINS = True
 ALLOWED_HOSTS = [   
     '127.0.0.1',
     'localhost', 
     '10.0.2.2',
+    '.onrender.com',
     '0.0.0.0',
+    'http://localhost:3000',
+    'http://26.215.177.220:3000',
     'militantly-unjeopardised-jene.ngrok-free.dev',
     'https://militantly-unjeopardised-jene.ngrok-free.dev',
     'http://militantly-unjeopardised-jene.ngrok-free.dev',
@@ -81,6 +84,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
 ]
 
 ROOT_URLCONF = 'park_baku_api.urls'
