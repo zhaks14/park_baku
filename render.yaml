@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: park-baku-api
+    env: python
+    buildCommand: "pip install -r park_baku_api/requirements.txt"
+    startCommand: "gunicorn park_baku_api.wsgi:application --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: park_baku_api.settings
