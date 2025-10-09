@@ -14,9 +14,9 @@ from decimal import Decimal
 from django.db.models import Sum, Count
 from django.http import JsonResponse
 
-TWILIO_ACCOUNT_SID = 'AC44b190420e71038a0d88e11bfe809cf6'
-TWILIO_AUTH_TOKEN = '1770fed861f4293401c8a67add3c2fe6'
-TWILIO_PHONE_NUMBER = '+18592377972'
+TWILIO_ACCOUNT_SID="AC037a17f6ce90b561c8194d883821f0fc"
+TWILIO_AUTH_TOKEN="57d6d6230d0005670b6b1751cb793ff6"
+TWILIO_PHONE_NUMBER="+18777804236"
 
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
