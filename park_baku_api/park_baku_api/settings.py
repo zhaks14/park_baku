@@ -31,7 +31,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # это для настройки отправки сообщений для регистрации через смс
 TWILIO_ACCOUNT_SID="AC037a17f6ce90b561c8194d883821f0fc"
-TWILIO_AUTH_TOKEN="bc5da46373a6186176035e63dee45ff6"
+TWILIO_AUTH_TOKEN="9e6ba772d0b3f33da0dfa692679b34db"
 TWILIO_PHONE_NUMBER="+12294083455"
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
