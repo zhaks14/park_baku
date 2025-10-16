@@ -53,6 +53,7 @@ ALLOWED_HOSTS = [
     'militantly-unjeopardised-jene.ngrok-free.dev',
     'https://militantly-unjeopardised-jene.ngrok-free.dev',
     'http://militantly-unjeopardised-jene.ngrok-free.dev',
+    'https://82.115.49.250',
 ]
 
 
