@@ -54,6 +54,7 @@ ALLOWED_HOSTS = [
     'https://militantly-unjeopardised-jene.ngrok-free.dev',
     'http://militantly-unjeopardised-jene.ngrok-free.dev',
     'https://82.115.49.250',
+    'https://park-baku.kz/api',
 ]
 
 
